@@ -8,6 +8,7 @@ import com.hotel.repository.GuestRepository;
 import com.hotel.repository.HotelRepository;
 import com.hotel.repository.RoomRepository;
 import com.hotel.service.StaffOperationsService;
+import com.hotel.service.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,16 +29,19 @@ public class StaffOperationsServiceImpl implements StaffOperationsService {
     private final BookingRepository bookingRepository;
     private final GuestRepository guestRepository;
     private final HotelRepository hotelRepository;
+    private final NotificationService notificationService;
 
     @Autowired
     public StaffOperationsServiceImpl(RoomRepository roomRepository,
                                       BookingRepository bookingRepository,
                                       GuestRepository guestRepository,
-                                      HotelRepository hotelRepository) {
+                                      HotelRepository hotelRepository,
+                                      NotificationService notificationService) {
         this.roomRepository = roomRepository;
         this.bookingRepository = bookingRepository;
         this.guestRepository = guestRepository;
         this.hotelRepository = hotelRepository;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -491,9 +495,17 @@ public class StaffOperationsServiceImpl implements StaffOperationsService {
         Optional<Room> opt = roomRepository.findById(roomId);
         if (opt.isPresent()) {
             Room r = opt.get();
+            RoomStatus oldStatus = r.getStatus();
             r.setStatus(newStatus);
             roomRepository.save(r);
             log.info("Staff operational room status updated: Room {} -> {}", r.getRoomNumber(), newStatus);
+            try {
+                if (notificationService != null) {
+                    notificationService.notifyRoomStatusChange(r, oldStatus, newStatus, "Staff Operations");
+                }
+            } catch (Exception ex) {
+                log.warn("Room status change notification dispatch failed: {}", ex.getMessage());
+            }
             return true;
         }
         return false;

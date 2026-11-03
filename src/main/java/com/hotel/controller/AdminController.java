@@ -9,6 +9,8 @@ import com.hotel.model.Notification;
 import com.hotel.model.Staff;
 import com.hotel.model.enums.AccountStatus;
 import com.hotel.service.*;
+import com.hotel.service.DynamicTariffService;
+import com.hotel.service.RoomService;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +45,8 @@ public class AdminController {
     private final OfferService offerService;
     private final HotelService hotelService;
     private final DemoDataService demoDataService;
+    private final RoomService roomService;
+    private final DynamicTariffService dynamicTariffService;
 
     @Autowired
     public AdminController(AdminService adminService,
@@ -53,7 +57,9 @@ public class AdminController {
                            AdminOperationsService adminOperationsService,
                            OfferService offerService,
                            HotelService hotelService,
-                           DemoDataService demoDataService) {
+                           DemoDataService demoDataService,
+                           RoomService roomService,
+                           DynamicTariffService dynamicTariffService) {
         this.adminService = adminService;
         this.staffService = staffService;
         this.guestService = guestService;
@@ -63,6 +69,8 @@ public class AdminController {
         this.offerService = offerService;
         this.hotelService = hotelService;
         this.demoDataService = demoDataService;
+        this.roomService = roomService;
+        this.dynamicTariffService = dynamicTariffService;
     }
 
     @ModelAttribute("unreadNotificationCount")
@@ -464,6 +472,38 @@ public class AdminController {
         }
         model.addAttribute("bookings", bookingService.getAllBookings());
         return "admin/bookings";
+    }
+
+    /**
+     * Luxury Room & Suite Inventory (ADMIN ROOMS)
+     */
+    @GetMapping("/rooms")
+    public String rooms(Model model, HttpSession session) {
+        model.addAttribute("activeNav", "rooms");
+        if (demoDataService.isDemoMode(session)) {
+            model.addAttribute("rooms", demoDataService.getStaffRoomsList(session));
+            return "admin/rooms";
+        }
+        model.addAttribute("rooms", roomService.getAllRooms());
+        return "admin/rooms";
+    }
+
+    /**
+     * Dynamic Tariff Analytics & Revenue Reports (ADMIN REPORTS)
+     */
+    @GetMapping("/reports")
+    public String reports(Model model, HttpSession session) {
+        model.addAttribute("activeNav", "reports");
+        Map<String, Object> tariffAnalytics = dynamicTariffService.getDynamicTariffAnalytics();
+        model.addAllAttributes(tariffAnalytics);
+        model.addAttribute("analytics", tariffAnalytics);
+        return "admin/reports";
+    }
+
+    @GetMapping("/api/operations/dynamic-tariff")
+    @ResponseBody
+    public Map<String, Object> getDynamicTariffApi() {
+        return dynamicTariffService.getDynamicTariffAnalytics();
     }
 
     /**

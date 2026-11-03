@@ -5,6 +5,10 @@ import com.hotel.model.Guest;
 import com.hotel.model.Hotel;
 import com.hotel.model.PlannedHotel;
 import com.hotel.service.*;
+import com.hotel.matcher.HotelMatchResult;
+import com.hotel.matcher.PreferenceCriteria;
+import com.hotel.matcher.PreferenceMatcher;
+import com.hotel.model.GuestPreference;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -34,13 +38,15 @@ public class GuestController {
     private final PlannedHotelService plannedHotelService;
     private final OfferService offerService;
     private final DemoDataService demoDataService;
+    private final PreferenceMatcher preferenceMatcher;
 
     @Autowired
     public GuestController(GuestService guestService, RoomService roomService,
                            BookingService bookingService, HotelService hotelService,
                            PlannedHotelService plannedHotelService,
                            OfferService offerService,
-                           DemoDataService demoDataService) {
+                           DemoDataService demoDataService,
+                           PreferenceMatcher preferenceMatcher) {
         this.guestService = guestService;
         this.roomService = roomService;
         this.bookingService = bookingService;
@@ -48,6 +54,7 @@ public class GuestController {
         this.plannedHotelService = plannedHotelService;
         this.offerService = offerService;
         this.demoDataService = demoDataService;
+        this.preferenceMatcher = preferenceMatcher;
     }
 
     /**
@@ -156,15 +163,46 @@ public class GuestController {
     @GetMapping("/recommendations")
     public String recommendations(Model model, Principal principal, HttpSession session) {
         model.addAttribute("activeNav", "recommendations");
-        List<Hotel> recommendedHotels = hotelService.getAllKarnatakaHotels();
-        model.addAttribute("hotels", recommendedHotels);
 
         if (demoDataService.isDemoMode(session)) {
+            model.addAttribute("hotels", hotelService.getAllKarnatakaHotels());
             model.addAttribute("plannedHotelIds", demoDataService.getGuestPlannedHotelIds(session));
-        } else {
-            String username = principal != null ? principal.getName() : null;
-            model.addAttribute("plannedHotelIds", plannedHotelService.getPlannedHotelIdsForGuest(username));
+            model.addAttribute("isPersonalized", false);
+            return "guest/recommendations";
         }
+
+        String username = principal != null ? principal.getName() : null;
+        model.addAttribute("plannedHotelIds", plannedHotelService.getPlannedHotelIdsForGuest(username));
+
+        List<Hotel> candidateHotels = hotelService.getAllHotels();
+        boolean personalized = false;
+
+        if (username != null) {
+            Optional<Guest> guestOpt = guestService.getGuestByUsername(username);
+            if (guestOpt.isPresent() && guestOpt.get().getPreference() != null) {
+                GuestPreference pref = guestOpt.get().getPreference();
+                PreferenceCriteria criteria = PreferenceCriteria.builder()
+                        .state("Karnataka")
+                        .roomType(pref.getPreferredCategory() != null ? pref.getPreferredCategory().name() : null)
+                        .build();
+
+                List<HotelMatchResult> rankedResults = preferenceMatcher.matchAndRankHotels(candidateHotels, criteria);
+                List<Hotel> rankedHotels = rankedResults.stream()
+                        .map(HotelMatchResult::getHotel)
+                        .limit(20)
+                        .toList();
+
+                if (!rankedHotels.isEmpty()) {
+                    model.addAttribute("hotels", rankedHotels);
+                    personalized = true;
+                }
+            }
+        }
+
+        if (!personalized) {
+            model.addAttribute("hotels", hotelService.getAllKarnatakaHotels());
+        }
+        model.addAttribute("isPersonalized", personalized);
         return "guest/recommendations";
     }
 

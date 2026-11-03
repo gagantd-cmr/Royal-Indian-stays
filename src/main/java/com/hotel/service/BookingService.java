@@ -24,4 +24,5 @@ public interface BookingService {
     void cancelBooking(Long bookingId);
     long getTotalBookingCount();
     void processAutomaticStatusTransitions();
+    double calculateDynamicTariff(Long roomId, LocalDate checkIn, LocalDate checkOut);
 }

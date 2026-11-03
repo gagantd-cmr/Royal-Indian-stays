@@ -45,7 +45,7 @@
                                 <th>Category Tier</th>
                                 <th>Floor</th>
                                 <th>Base Price / Night</th>
-                                <th>Current Tariff</th>
+                                <th>Current Dynamic Tariff</th>
                                 <th>Max Occupancy</th>
                                 <th>Current Status</th>
                                 <th>Amenities</th>
@@ -58,8 +58,8 @@
                                     <span class="room-category-pill" style="position: static; font-size: 0.72rem; padding: 0.2rem 0.55rem;" th:text="${room.category.displayName}">Deluxe</span>
                                 </td>
                                 <td th:text="'Floor ' + ${room.floorNumber}">Floor 1</td>
-                                <td><span th:text="'₹' + ${#numbers.formatDecimal(room.basePricePerNight, 1, 2)}">₹4,500.00</span></td>
-                                <td><strong style="color: var(--gold-accent);" th:text="'₹' + ${#numbers.formatDecimal(room.currentTariff, 1, 2)}">₹4,500.00</strong></td>
+                                <td><span th:text="'&#8377;' + ${#numbers.formatDecimal(room.basePricePerNight, 1, 2)}">&#8377;4,500.00</span></td>
+                                <td><strong style="color: var(--gold-accent);" th:text="'&#8377;' + ${#numbers.formatDecimal(room.currentTariff, 1, 2)}">&#8377;4,500.00</strong></td>
                                 <td th:text="${room.maxOccupancy} + ' Guests'">2 Guests</td>
                                 <td>
                                     <span class="badge" th:classappend="${room.status.badgeClass}" th:text="${room.status.displayName}">Available</span>

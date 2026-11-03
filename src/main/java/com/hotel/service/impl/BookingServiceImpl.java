@@ -13,6 +13,8 @@ import com.hotel.repository.GuestRepository;
 import com.hotel.repository.HotelRepository;
 import com.hotel.repository.RoomRepository;
 import com.hotel.service.BookingService;
+import com.hotel.service.DynamicTariffService;
+import com.hotel.service.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,7 +31,8 @@ import java.util.stream.Collectors;
 /**
  * Service implementation for Stage 5 Guest Booking Lifecycle and Reservation Management.
  * Manages booking creation, date-range availability verification, price locking,
- * automatic completion transitions, and role-scoped access control.
+ * dynamic tariff optimization, real-time notification dispatch,
+ * automatic completion transitions, and role-scoped access control in pure Java.
  */
 @Service
 @Transactional
@@ -41,16 +44,22 @@ public class BookingServiceImpl implements BookingService {
     private final GuestRepository guestRepository;
     private final RoomRepository roomRepository;
     private final HotelRepository hotelRepository;
+    private final DynamicTariffService dynamicTariffService;
+    private final NotificationService notificationService;
 
     @Autowired
     public BookingServiceImpl(BookingRepository bookingRepository,
                               GuestRepository guestRepository,
                               RoomRepository roomRepository,
-                              HotelRepository hotelRepository) {
+                              HotelRepository hotelRepository,
+                              DynamicTariffService dynamicTariffService,
+                              NotificationService notificationService) {
         this.bookingRepository = bookingRepository;
         this.guestRepository = guestRepository;
         this.roomRepository = roomRepository;
         this.hotelRepository = hotelRepository;
+        this.dynamicTariffService = dynamicTariffService;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -78,11 +87,8 @@ public class BookingServiceImpl implements BookingService {
         }
         processAutomaticStatusTransitions();
         LocalDate today = LocalDate.now();
-        List<Booking> all = bookingRepository.findByGuestId(guestId);
-        return all.stream()
-                .filter(b -> (b.getStatus() == BookingStatus.CONFIRMED ||
-                              b.getStatus() == BookingStatus.CHECKED_IN ||
-                              b.getStatus() == BookingStatus.PENDING))
+        return bookingRepository.findByGuestId(guestId).stream()
+                .filter(b -> b.getStatus() == BookingStatus.CONFIRMED || b.getStatus() == BookingStatus.CHECKED_IN)
                 .filter(b -> b.getCheckOutDate() != null && !b.getCheckOutDate().isBefore(today))
                 .sorted(Comparator.comparing(Booking::getCheckInDate))
                 .collect(Collectors.toList());
@@ -107,15 +113,19 @@ public class BookingServiceImpl implements BookingService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public Optional<Booking> getBookingById(Long id) {
+        if (id == null) return Optional.empty();
+        processAutomaticStatusTransitions();
         return bookingRepository.findById(id);
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public Optional<Booking> getBookingByReference(String reference) {
-        return bookingRepository.findByBookingReference(reference);
+        if (reference == null || reference.isBlank()) return Optional.empty();
+        processAutomaticStatusTransitions();
+        return bookingRepository.findByBookingReference(reference.trim());
     }
 
     @Override
@@ -126,20 +136,14 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional
     public Booking createBooking(BookingRequestDto dto, String username) {
+        if (dto == null) {
+            throw new BookingException("Booking request data cannot be null");
+        }
         if (username == null || username.isBlank()) {
-            throw new BookingException("Authentication required: Guest username must be provided.");
+            throw new BookingException("Authenticated guest username is required");
         }
 
-        Guest guest = guestRepository.findByUsernameIgnoreCase(username.trim())
-                .orElseThrow(() -> new BookingException("Guest account not found for username: " + username));
-
-        if (dto.getRoomId() == null) {
-            throw new BookingException("Please select a room accommodation.");
-        }
-
-        Room room = roomRepository.findById(dto.getRoomId())
-                .orElseThrow(() -> new BookingException("Selected room accommodation not found."));
-
+        // Validate and parse dates
         LocalDate checkIn = dto.getCheckInDate();
         LocalDate checkOut = dto.getCheckOutDate();
 
@@ -147,17 +151,31 @@ public class BookingServiceImpl implements BookingService {
             throw new BookingException("Please select check-in and check-out dates.");
         }
 
+        LocalDate today = LocalDate.now();
+        if (checkIn.isBefore(today)) {
+            throw new BookingException("Check-in date cannot be in the past.");
+        }
         if (!checkOut.isAfter(checkIn)) {
             throw new BookingException("Check-out date must be strictly after the check-in date.");
         }
 
-        if (checkIn.isBefore(LocalDate.now())) {
-            throw new BookingException("Check-in date cannot be in the past.");
+        // Resolve Guest entity
+        Guest guest = guestRepository.findByUsernameIgnoreCase(username)
+                .orElseThrow(() -> new BookingException("Guest account not found for username: " + username));
+
+        // Resolve Room entity
+        Long roomId = dto.getRoomId();
+        if (roomId == null) {
+            throw new BookingException("Room ID must be specified");
         }
 
-        // Verify availability before confirming
-        if (!isRoomAvailable(room.getId(), checkIn, checkOut)) {
-            throw new BookingException("Selected room is unavailable for the selected dates. Please choose another room or date range.");
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new BookingException("Room not found with ID: " + roomId));
+
+        // Verify date availability
+        if (!isRoomAvailable(roomId, checkIn, checkOut)) {
+            throw new BookingException("Selected room " + room.getRoomNumber() +
+                    " is unavailable for the selected dates (" + checkIn + " to " + checkOut + ")");
         }
 
         // Resolve Hotel property
@@ -169,12 +187,20 @@ public class BookingServiceImpl implements BookingService {
             hotel = hotelRepository.findAll().stream().findFirst().orElse(null);
         }
 
-        // Price Calculation & Historical Lock (Stage 5 Requirement 13)
+        // Price Calculation & Historical Lock with Dynamic Tariff Optimizer (Stage 5 Requirement 13)
         long nights = ChronoUnit.DAYS.between(checkIn, checkOut);
         if (nights <= 0) {
             nights = 1;
         }
-        double nightlyTariff = room.getCurrentTariff() > 0 ? room.getCurrentTariff() : room.getBasePricePerNight();
+
+        double nightlyTariff;
+        if (room.getCurrentTariff() > 0) {
+            nightlyTariff = room.getCurrentTariff();
+        } else {
+            nightlyTariff = dynamicTariffService.calculateDynamicTariff(room, checkIn, checkOut);
+            room.setCurrentTariff(nightlyTariff);
+            roomRepository.save(room);
+        }
         double totalAmount = nights * nightlyTariff;
 
         // Generate unique reference
@@ -232,6 +258,14 @@ public class BookingServiceImpl implements BookingService {
                 saved.getBookingReference(), guest.getUsername(),
                 (hotel != null ? hotel.getName() : "N/A"),
                 room.getRoomNumber(), checkIn, checkOut, totalAmount);
+
+        // Dispatch notifications to Guest, Staff, and Admins in pure Java
+        try {
+            notificationService.notifyBookingCreated(saved);
+        } catch (Exception ex) {
+            log.warn("Notification dispatch failed for booking {}: {}", saved.getBookingReference(), ex.getMessage());
+        }
+
         return saved;
     }
 
@@ -282,13 +316,27 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     public void cancelBooking(Long bookingId) {
-        updateBookingStatus(bookingId, BookingStatus.CANCELLED);
+        Booking booking = updateBookingStatus(bookingId, BookingStatus.CANCELLED);
+        try {
+            notificationService.notifyBookingCancelled(booking);
+        } catch (Exception ex) {
+            log.warn("Cancellation notification dispatch failed for booking {}: {}", bookingId, ex.getMessage());
+        }
     }
 
     @Override
     @Transactional(readOnly = true)
     public long getTotalBookingCount() {
         return bookingRepository.count();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public double calculateDynamicTariff(Long roomId, LocalDate checkIn, LocalDate checkOut) {
+        if (roomId == null) return 4500.0;
+        Room room = roomRepository.findById(roomId).orElse(null);
+        if (room == null) return 4500.0;
+        return dynamicTariffService.calculateDynamicTariff(room, checkIn, checkOut);
     }
 
     /**
