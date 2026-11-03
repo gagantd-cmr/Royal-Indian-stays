@@ -49,11 +49,55 @@ This document details the public HTTPS deployment architecture, portal routes, a
 
 The codebase includes all configuration required for 1-click cloud deployment:
 
-1. **`Dockerfile`**: Hardened, multi-stage Docker build utilizing Eclipse Temurin 17 with unprivileged user execution (`appuser`) and container health checks.
-2. **`railway.toml`**: Railway deployment manifest with automated health check configuration and failure recovery.
-3. **`application-prod.properties`**: Production configuration profile enabling reverse proxy headers, cookie flags (`secure=true`, `httpOnly=true`, `sameSite=lax`), database pooling, and template caching.
-4. **`.env.example`**: Environment variable template containing parameter names.
-5. **`HealthCheckController.java`**: Dedicated `/health` and `/actuator/health` endpoint for uptime monitoring.
+1. **`Dockerfile.vercel`**: Optimized multi-stage Docker build for Vercel Containers (Fluid Compute / OCI Image Runtime) with dynamic `$PORT` binding and container cgroup memory awareness (`-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0`).
+2. **`vercel.json`**: Vercel configuration setting `"framework": "container"` to automatically detect and run `Dockerfile.vercel`.
+3. **`Dockerfile`**: Hardened, multi-stage Docker build utilizing Eclipse Temurin 17 with unprivileged user execution (`appuser`) and container health checks.
+4. **`railway.toml`**: Railway deployment manifest with automated health check configuration and failure recovery.
+5. **`application-prod.properties`**: Production configuration profile enabling reverse proxy headers, cookie flags (`secure=true`, `httpOnly=true`, `sameSite=lax`), database pooling, and template caching.
+6. **`.env.example`**: Environment variable template containing parameter names.
+7. **`HealthCheckController.java`**: Dedicated `/health` and `/actuator/health` endpoint for uptime monitoring.
+
+---
+
+## ⚡ Step-by-Step Vercel Container Deployment Guide
+
+Deploying Royal Indian Stays to **Vercel Containers**:
+
+### Step 1: Push Codebase to GitHub
+Ensure the changes including `Dockerfile.vercel` and `vercel.json` are committed and pushed:
+```bash
+git add .
+git commit -m "Configure Vercel container deployment"
+git push origin main
+```
+
+### Step 2: Import into Vercel
+1. Log in to [https://vercel.com/](https://vercel.com/).
+2. Click **"Add New..."** → **"Project"**.
+3. Import your GitHub repository (`Royal-Indian-stays`).
+4. Vercel automatically detects `Dockerfile.vercel` and the `container` framework preset.
+
+### Step 3: Configure Environment Variables in Vercel
+In the Vercel project deployment settings (under **Environment Variables**), add:
+
+| Variable Name | Example Value | Description |
+| :--- | :--- | :--- |
+| `SPRING_PROFILES_ACTIVE` | `prod` | Activates production profile with template caching and secure sessions |
+| `POSTGRES_URL` (or `DATABASE_URL`) | `postgres://user:password@ep-host.region.pooler.neon.tech/neondb?sslmode=require` | Vercel Postgres / Neon / Supabase connection URL |
+| `ADMIN_GAGAN_PASSWORD` | `<secure-strong-password>` | Admin 1 credentials |
+| `ADMIN_DARSHAN_PASSWORD` | `<secure-strong-password>` | Admin 2 credentials |
+
+*(Note: If you link a Vercel Postgres store to the project via the **Storage** tab, Vercel automatically injects `POSTGRES_URL`! The application's `DatabaseConfig` will automatically detect and configure it).*
+
+### Step 4: Deploy & Verify
+1. Click **Deploy**.
+2. Once deployment completes, visit your production URL:
+   `https://<your-project>.vercel.app/`
+3. Verify public endpoints:
+   - Root Homepage: `https://<your-project>.vercel.app/`
+   - Health Check: `https://<your-project>.vercel.app/health`
+   - Hotel Directory: `https://<your-project>.vercel.app/hotels`
+   - Sandbox Demo: `https://<your-project>.vercel.app/demo`
 
 ---
 

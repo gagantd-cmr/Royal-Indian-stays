@@ -27,6 +27,12 @@ public class DatabaseConfig {
     @Value("${DATABASE_URL:#{null}}")
     private String envDatabaseUrl;
 
+    @Value("${POSTGRES_URL:#{null}}")
+    private String envPostgresUrl;
+
+    @Value("${POSTGRES_PRISMA_URL:#{null}}")
+    private String envPostgresPrismaUrl;
+
     @Value("${spring.datasource.url:jdbc:postgresql://localhost:5432/luxury_hotel_db}")
     private String postgresUrl;
 
@@ -46,11 +52,14 @@ public class DatabaseConfig {
         String effectiveUsername = postgresUsername;
         String effectivePassword = postgresPassword;
 
-        // Support cloud provider DATABASE_URL (Railway, Render, Heroku)
-        if (envDatabaseUrl != null && !envDatabaseUrl.isBlank()) {
+        // Support cloud provider database URLs (Vercel Postgres, Railway, Render, Supabase, Neon)
+        String cloudDbUrl = (envDatabaseUrl != null && !envDatabaseUrl.isBlank()) ? envDatabaseUrl :
+                (envPostgresUrl != null && !envPostgresUrl.isBlank()) ? envPostgresUrl : envPostgresPrismaUrl;
+
+        if (cloudDbUrl != null && !cloudDbUrl.isBlank()) {
             try {
-                if (envDatabaseUrl.startsWith("postgres://") || envDatabaseUrl.startsWith("postgresql://")) {
-                    URI dbUri = new URI(envDatabaseUrl);
+                if (cloudDbUrl.startsWith("postgres://") || cloudDbUrl.startsWith("postgresql://")) {
+                    URI dbUri = new URI(cloudDbUrl);
                     String userInfo = dbUri.getUserInfo();
                     if (userInfo != null && userInfo.contains(":")) {
                         String[] parts = userInfo.split(":", 2);
@@ -61,15 +70,15 @@ public class DatabaseConfig {
                     int port = dbUri.getPort() > 0 ? dbUri.getPort() : 5432;
                     String path = dbUri.getPath();
                     effectiveUrl = "jdbc:postgresql://" + host + ":" + port + path;
-                    if (dbUri.getQuery() != null) {
+                    if (dbUri.getQuery() != null && !dbUri.getQuery().isBlank()) {
                         effectiveUrl += "?" + dbUri.getQuery();
                     }
-                } else if (envDatabaseUrl.startsWith("jdbc:")) {
-                    effectiveUrl = envDatabaseUrl;
+                } else if (cloudDbUrl.startsWith("jdbc:")) {
+                    effectiveUrl = cloudDbUrl;
                 }
-                log.info("Detected cloud DATABASE_URL, configured JDBC URL: {}", sanitizeUrl(effectiveUrl));
+                log.info("Detected cloud Database URL, configured JDBC URL: {}", sanitizeUrl(effectiveUrl));
             } catch (Exception e) {
-                log.warn("Could not parse DATABASE_URL environment variable: {}. Using default datasource configuration.", e.getMessage());
+                log.warn("Could not parse cloud Database URL environment variable: {}. Using default datasource configuration.", e.getMessage());
             }
         }
 
